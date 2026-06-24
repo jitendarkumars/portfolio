@@ -1,0 +1,24 @@
+{
+  "name": "jeet-portfolio",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Modern animated full-stack developer portfolio with blog and daily vlog.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node prerender.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-three/fiber": "^8.17.10",
+    "framer-motion": "^11.11.17",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.1",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.8"
+  }
+}

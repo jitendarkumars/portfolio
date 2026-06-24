@@ -1,0 +1,15 @@
+[
+  {
+    "id": "day-2",
+    "date": "2026-06-24",
+    "title": "Day 2 — Remotion builds and tooling setup",
+    "youtube": "",
+    "mood": "🔧",
+    "notes": "Spent time iterating on the Remotion project, running builds and testing npm scripts. Set up Obsidian as a knowledge management tool for documentation.",
+    "tasks": [
+      "Ran npm build scripts in remotion project",
+      "Tested build-in-public.mjs automation script",
+      "Installed Obsidian for note-taking"
+    ]
+  }
+]

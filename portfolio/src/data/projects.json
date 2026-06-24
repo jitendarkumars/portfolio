@@ -1,0 +1,98 @@
+[
+  {
+    "id": "shoonya-ticketing",
+    "title": "Shoonya Ticketing Platform",
+    "blurb": "Re-architected a stock broker's legacy ticketing into an event-driven microservice — halving the user flow and automating KYC, bank verification and payments.",
+    "detail": "Shoonya's in-app ticketing lets 140K+ active clients raise 15 types of account-data change requests. As technical lead with a 4-developer team, I rebuilt it from a monolith into a standalone, event-driven microservice and streamlined the journey end to end — delivered in 3 months.",
+    "highlights": [
+      "Cut the ticket-creation flow from 4 steps to 2 by consolidating fragmented legacy journeys.",
+      "Automated penny-drop bank verification (HyperVerge), e-sign/KYC (Digio) and payments (Razorpay).",
+      "Event-driven services on NestJS + RabbitMQ + Redis with a full audit-log layer."
+    ],
+    "tags": ["Next.js", "NestJS", "MySQL", "RabbitMQ", "Redis"],
+    "emoji": "🎫",
+    "featured": true,
+    "live": "",
+    "code": ""
+  },
+  {
+    "id": "xprizo",
+    "title": "XPRIZO Wallet",
+    "blurb": "A multi-currency digital wallet for cross-border payments — built from scratch as a Flutter app (iOS & Android) with an Angular back-office.",
+    "detail": "XPRIZO is an all-in-one digital finance platform (wallet, remittance, FX, merchant/agent payments) serving emerging markets. I led the India team alongside the client CTO and built the product from the ground up on the Sapidblue Accelerator services.",
+    "highlights": [
+      "Built the Flutter app for Android & iOS — live on Google Play and the App Store.",
+      "Built the Angular 17 back-office for operations and configuration.",
+      "Multi-currency wallet with cross-border transfers, FX and merchant/agent flows."
+    ],
+    "tags": ["Flutter", "Angular 17", "NestJS", "Fintech"],
+    "emoji": "💸",
+    "featured": true,
+    "live": "https://xprizo.com",
+    "code": ""
+  },
+  {
+    "id": "shoonya-tv-charts",
+    "title": "Shoonya TV Charts",
+    "blurb": "A reusable Android module embedding TradingView's Advanced Charts into a trading app, with live candles streamed from market-data APIs.",
+    "detail": "A drop-in Android library that brings TradingView-grade charting to Shoonya's trading app. I implemented a custom datafeed, a JavaScript⇄Kotlin bridge, and a real-time candle aggregator — packaged for reuse with Hilt and Retrofit.",
+    "highlights": [
+      "Custom TradingView datafeed (resolveSymbol / getBars / subscribeBars) wired to EOD & TP-series APIs.",
+      "Real-time CandleAggregator builds live OHLC candles across 9 timeframes.",
+      "Served the charting library on-device via an embedded NanoHTTPD server to satisfy same-origin."
+    ],
+    "tags": ["Kotlin", "Jetpack Compose", "TradingView", "WebView"],
+    "emoji": "📈",
+    "featured": true,
+    "live": "",
+    "code": "https://github.com/jitendarkumars/shoonya_tv_charts"
+  },
+  {
+    "id": "ikf",
+    "title": "IKF — AI Stock Picks",
+    "blurb": "A self-contained Android feature module surfacing AI-driven stock picks, holdings and a full subscription flow — built to drop into the Shoonya app.",
+    "detail": "IKF (\"I Know First\") packages an external AI-forecasting service into a polished, monetized in-app experience on a clean MVVM + Hilt architecture.",
+    "highlights": [
+      "AI daily stock & index picks, performance history, indices and an interactive heat-map.",
+      "Full subscription lifecycle: in-app WebView checkout, payment-status polling, cancel-at-cycle-end.",
+      "Paging 3 + Room caching, API-key-secured networking, token-based auth bridging Shoonya."
+    ],
+    "tags": ["Kotlin", "Jetpack Compose", "Hilt", "Paging 3"],
+    "emoji": "🤖",
+    "featured": false,
+    "live": "",
+    "code": "https://github.com/jitendarkumars/ikf"
+  },
+  {
+    "id": "sapidblue-accelerator",
+    "title": "Sapidblue Accelerator",
+    "blurb": "A plug-and-play micro-frontend service platform — auth, payments, wallet, comms and config — composable into new products fast.",
+    "detail": "A library of standalone micro-frontend services on Angular + NestJS that can be used alone or combined to assemble entire products. It powered multiple client builds including XPRIZO, Cryr and PayPR.",
+    "highlights": [
+      "Independent services: auth, communication, user & config management, retail, wallet, payments.",
+      "Angular micro-frontends (Module Federation) + NestJS + MySQL.",
+      "Reused across products shipped in three markets."
+    ],
+    "tags": ["Angular", "NestJS", "Module Federation", "MySQL"],
+    "emoji": "🧩",
+    "featured": false,
+    "live": "https://ucm.sapidblue.in",
+    "code": ""
+  },
+  {
+    "id": "cryr",
+    "title": "Cryr — Credit Reporting",
+    "blurb": "A US credit-reporting product built on the Accelerator — custom credit business logic, Plaid bank-data integration, and a Flutter customer app.",
+    "detail": "Cryr delivers credit reporting to US consumers. I built the credit-handling business-logic service on top of the Accelerator base services and a Flutter app for customers.",
+    "highlights": [
+      "Plaid integration for secure bank-account & financial-data access.",
+      "Kafka + Redis + MySQL microservice backend on NestJS.",
+      "Flutter customer app with the Accelerator powering the back-office."
+    ],
+    "tags": ["NestJS", "Kafka", "Redis", "Plaid", "Flutter"],
+    "emoji": "📊",
+    "featured": false,
+    "live": "",
+    "code": ""
+  }
+]

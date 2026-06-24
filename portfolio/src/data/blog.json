@@ -1,0 +1,503 @@
+[
+  {
+    "id": "tradingview-android-charting-library",
+    "title": "Embedding TradingView Advanced Charts in a Native Android App",
+    "date": "2026-06-22",
+    "readingTime": "11 min",
+    "tags": [
+      "Android",
+      "Kotlin",
+      "TradingView",
+      "WebView"
+    ],
+    "excerpt": "How I dropped TradingView's Charting Library into a Kotlin/Compose trading app — served from a local web server, wired through a JS⇄Kotlin bridge, fed by a custom datafeed and a real-time OHLC candle aggregator.",
+    "blocks": [
+      {
+        "type": "p",
+        "text": "TradingView's Advanced Charts (the Charting Library) is the gold standard for financial charts — but it's a JavaScript library, and I needed it inside a native Android trading app, driven by the broker's own market data. Dropping it into a WebView is the easy 20%. Here's the architecture that handled the other 80%: serving the library, talking to it from Kotlin, and feeding it both historical and live data."
+      },
+      {
+        "type": "h",
+        "text": "Widget vs. Charting Library"
+      },
+      {
+        "type": "p",
+        "text": "TradingView ships two things. The free embeddable widget is hosted and locked to TradingView's data — fine for a marketing page. The Charting Library (Advanced Charts) is self-hosted and brings-your-own-data: your symbols, your OHLC history, your real-time ticks. For a broker app you need the library. And because it's web, on Android it lives in a WebView."
+      },
+      {
+        "type": "h",
+        "text": "Architecture at a glance"
+      },
+      {
+        "type": "ul",
+        "items": [
+          "A WebView (Compose AndroidView) renders the chart.",
+          "A local NanoHTTPD server serves the bundled library assets to that WebView.",
+          "A JS⇄Kotlin bridge passes messages both ways.",
+          "A custom Datafeed implements TradingView’s data contract (onReady / resolveSymbol / getBars / subscribeBars).",
+          "A CandleAggregator turns the broker’s live ticks into OHLC candles."
+        ]
+      },
+      {
+        "type": "p",
+        "text": "All of it is packaged as a reusable Android library module, so any app can drop in a single composable and wire up a data listener."
+      },
+      {
+        "type": "h",
+        "text": "1. Serve the library from a local web server"
+      },
+      {
+        "type": "p",
+        "text": "The first wall you hit: the Charting Library will not run from a file:// URL. It relies on a real http(s) origin (same-origin checks, web workers, module loading). Pointing the WebView at a bundled file simply fails to initialise. The fix is to run a tiny HTTP server inside the app that serves the bundled assets, and load the chart over http://localhost."
+      },
+      {
+        "type": "code",
+        "lang": "kotlin",
+        "code": "// Serves the bundled charting_library assets to the WebView over http://localhost\nclass LocalWebServer(private val context: Context, port: Int = 8080) : NanoHTTPD(port) {\n    override fun serve(session: IHTTPSession): Response {\n        val uri = if (session.uri == \"/\") \"/index.html\" else session.uri\n        return try {\n            val input = context.assets.open(uri.substring(1))   // assets/charting_library/...\n            newChunkedResponse(Response.Status.OK, mimeOf(uri), input).apply {\n                addHeader(\"Access-Control-Allow-Origin\", \"*\")\n            }\n        } catch (e: IOException) {\n            newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, \"Not found\")\n        }\n    }\n}"
+      },
+      {
+        "type": "p",
+        "text": "Then I tie the server lifecycle to the composable and point the WebView at it:"
+      },
+      {
+        "type": "code",
+        "lang": "kotlin",
+        "code": "@Composable\nfun TradingViewChart(listener: TradingViewListener, commands: TradingViewCommands) {\n    val context = LocalContext.current\n    val server = remember { LocalWebServer(context, 8080) }\n\n    DisposableEffect(Unit) {\n        server.start()                       // serve assets on :8080\n        onDispose { server.stop() }\n    }\n\n    AndroidView(factory = { ctx ->\n        createWebView(ctx, listener, commands as TradingViewCommandsImpl)\n    })\n}"
+      },
+      {
+        "type": "h",
+        "text": "2. Configure the WebView and the JS bridge"
+      },
+      {
+        "type": "p",
+        "text": "A handful of WebView settings matter (JavaScript, DOM storage, mixed content, and disabling the cache while iterating). Then addJavascriptInterface exposes native methods to the page as window.AndroidInterface — the channel the chart uses to ask Kotlin for things."
+      },
+      {
+        "type": "code",
+        "lang": "kotlin",
+        "code": "WebView(context).apply {\n    settings.javaScriptEnabled = true\n    settings.domStorageEnabled = true\n    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW\n    settings.cacheMode = WebSettings.LOAD_NO_CACHE\n\n    // Expose native methods to JS as window.AndroidInterface\n    addJavascriptInterface(TradingViewBridge(listener), \"AndroidInterface\")\n\n    webViewClient = object : WebViewClient() {\n        override fun onPageFinished(view: WebView, url: String) {\n            commands.setWebView(view)        // now Kotlin can push data into the chart\n        }\n    }\n    loadUrl(\"http://localhost:8080/index.html\")\n}"
+      },
+      {
+        "type": "p",
+        "text": "The bridge itself is small — annotate methods with @JavascriptInterface and forward each call to a listener the host app implements:"
+      },
+      {
+        "type": "code",
+        "lang": "kotlin",
+        "code": "class TradingViewBridge(private val listener: TradingViewListener) {\n    @JavascriptInterface\n    fun fetchHistoricalData(paramsJson: String) {\n        val p = JSONObject(paramsJson)\n        listener.onHistoricalDataRequested(\n            symbol = p.getString(\"symbol\"),\n            interval = p.getString(\"interval\"),\n            from = p.getLong(\"from\"),\n            to = p.getLong(\"to\"),\n            callbackKey = p.getString(\"callbackKey\"),\n        )\n    }\n\n    @JavascriptInterface\n    fun searchSymbol(query: String) = listener.onSymbolSearchRequested(query)\n}"
+      },
+      {
+        "type": "h",
+        "text": "3. Implement a custom Datafeed"
+      },
+      {
+        "type": "p",
+        "text": "TradingView drives everything through a Datafeed object you provide: onReady declares capabilities, resolveSymbol describes an instrument, getBars supplies history, and subscribeBars/unsubscribeBars handle real-time. Each method bridges to native."
+      },
+      {
+        "type": "code",
+        "lang": "javascript",
+        "code": "function createDataFeed() {\n  return {\n    onReady: (cb) => setTimeout(() => cb({\n      supported_resolutions: [\"1\",\"5\",\"15\",\"60\",\"1D\",\"1W\",\"1M\"],\n      exchanges: [{ value: \"NSE\", name: \"NSE\", desc: \"NSE India\" }]\n    }), 0),\n\n    // TradingView asks for historical bars here.\n    getBars: (symbolInfo, resolution, periodParams, onHistoryCallback) => {\n      const { from, to } = periodParams;\n      const key = symbolInfo.name + \"_\" + resolution + \"_\" + from + \"_\" + to;\n\n      // getBars is synchronous, native is async ->\n      // stash the callback and resolve it once Kotlin returns the data.\n      pendingHistoryCallbacks.set(key, onHistoryCallback);\n\n      window.AndroidInterface.fetchHistoricalData(JSON.stringify({\n        symbol: symbolInfo.name, interval: resolution, from, to, callbackKey: key\n      }));\n    },\n\n    subscribeBars: (symbolInfo, resolution, onTick, uid) =>\n      subscribers.set(uid, { symbolInfo, resolution, onTick }),\n    unsubscribeBars: (uid) => subscribers.delete(uid),\n  };\n}"
+      },
+      {
+        "type": "p",
+        "text": "The key insight: getBars is synchronous, but fetching from a native API is not. So I stash TradingView’s callback in a map keyed by symbol_resolution_from_to, fire the request across the bridge, and resolve that callback later when the data comes back."
+      },
+      {
+        "type": "h",
+        "text": "4. Return data from Kotlin to the chart"
+      },
+      {
+        "type": "p",
+        "text": "Native fetches OHLC from the broker’s EOD and TP-series APIs (through the host app’s listener), then pushes it into the page with evaluateJavascript, which resolves the stored getBars callback."
+      },
+      {
+        "type": "code",
+        "lang": "kotlin",
+        "code": "override fun updateChartData(data: List<CandleData>, callbackKey: String) {\n    val bars = JSONArray()\n    data.forEach { c ->\n        // TradingView wants SECONDS; Android gives millis -> normalize.\n        val timeSec = if (c.time > 10_000_000_000L) c.time / 1000 else c.time\n        bars.put(JSONObject().apply {\n            put(\"time\", timeSec); put(\"open\", c.open); put(\"high\", c.high)\n            put(\"low\", c.low); put(\"close\", c.close); put(\"volume\", c.volume)\n        })\n    }\n    // resolve the pending getBars() callback inside the page\n    val js = \"updateChartData(\" + bars + \", \" + JSONObject.quote(callbackKey) + \")\"\n    webView?.evaluateJavascript(js, null)\n}"
+      },
+      {
+        "type": "quote",
+        "text": "The bug that cost me an afternoon: TradingView expects bar times in seconds, Android timestamps are milliseconds. Feed it millis and the chart silently renders nothing — no error, just an empty pane."
+      },
+      {
+        "type": "h",
+        "text": "5. Real-time candles with a CandleAggregator"
+      },
+      {
+        "type": "p",
+        "text": "History is the easy half. The live half is interesting because the broker’s WebSocket streams ticks (a last price), not finished candles. So I built a CandleAggregator that folds each tick into the current open candle for the active interval — updating high/low/close, and rolling over to a fresh candle when the interval boundary passes."
+      },
+      {
+        "type": "code",
+        "lang": "kotlin",
+        "code": "class CandleAggregator {\n    private val intervalSeconds = mapOf(\n        \"1\" to 60L, \"5\" to 300L, \"15\" to 900L, \"60\" to 3600L, \"1D\" to 86_400L\n    )\n\n    // Fold a live tick into the current open candle for its interval.\n    fun processTick(symbol: String, price: Double, ts: Long, interval: String): CandleData {\n        val bucket = intervalSeconds.getValue(interval)\n        val start = (ts / 1000 / bucket) * bucket            // align to interval\n        val k = symbol + interval\n        val c = active[k]\n        if (c == null || start > c.time) {                  // new interval -> roll over\n            active[k] = CandleData(start, price, price, price, price)\n        } else {\n            c.high = maxOf(c.high, price)\n            c.low = minOf(c.low, price)\n            c.close = price\n        }\n        return active.getValue(k)\n    }\n}"
+      },
+      {
+        "type": "p",
+        "text": "Each updated candle is handed to the datafeed’s real-time callback (the one stashed in subscribeBars), so the last bar on the chart ticks live as the market moves."
+      },
+      {
+        "type": "h",
+        "text": "Gotchas worth knowing"
+      },
+      {
+        "type": "ul",
+        "items": [
+          "file:// will not work — a local HTTP server is mandatory for the Charting Library.",
+          "Bar times must be in seconds, not milliseconds, or the chart renders empty.",
+          "getBars can fire overlapping/duplicate requests — key your pending callbacks and drop duplicates.",
+          "Only call evaluateJavascript after onPageFinished, or the push silently no-ops.",
+          "Enable WebView.setWebContentsDebuggingEnabled(true) and use chrome://inspect — debugging the chart from desktop DevTools is a lifesaver."
+        ]
+      },
+      {
+        "type": "h",
+        "text": "The result"
+      },
+      {
+        "type": "p",
+        "text": "A self-contained Android library module that gives a native trading app full TradingView-grade charts — real NSE symbols, historical EOD and intraday data, and live candles from the broker’s own feed — behind a clean Kotlin API: one composable plus a data listener. The mental model that unlocked it for me: treat the chart as a tiny web app you host locally and talk to over a typed bridge. Everything else is plumbing."
+      }
+    ]
+  },
+  {
+    "id": "screenpipe-lm-studio-local-memory",
+    "title": "I Gave a Local LLM a Memory of My Whole Screen: Screenpipe + LM Studio",
+    "date": "2026-06-21",
+    "readingTime": "10 min",
+    "tags": [
+      "Local AI",
+      "Screenpipe",
+      "LM Studio",
+      "MCP"
+    ],
+    "excerpt": "A fully offline “second brain” — Screenpipe records my screen 24/7, a local Qwen model in LM Studio reads it over MCP, and I can ask what I actually did all day. No cloud, no subscription.",
+    "blocks": [
+      {
+        "type": "p",
+        "text": "I context-switch constantly — trading charts, a Blender scene, three terminals, a half-read course. By evening I genuinely can't remember where the day went. Tools like Rewind solve this, but they ship your screen to the cloud, and that's a hard no for anything with bank or client data on it."
+      },
+      {
+        "type": "p",
+        "text": "So I built the private version: a local LLM that can see everything I've done and answer questions about it, running entirely on my own machine. No cloud, no subscription, nothing leaving the laptop. Here's the exact stack, how I set it up, and the real questions I asked it."
+      },
+      {
+        "type": "h",
+        "text": "The stack"
+      },
+      {
+        "type": "ul",
+        "items": [
+          "Screenpipe — records the screen (and mic) 24/7, OCRs every frame, and stores it locally with a search API.",
+          "LM Studio — runs a local model and, crucially, acts as an MCP host so the model can call external tools.",
+          "MCP (Model Context Protocol) — the glue that lets the LM Studio model call Screenpipe’s tools to read my screen history.",
+          "Hardware — a MacBook Pro M5 Max with 128 GB. Local models love unified memory."
+        ]
+      },
+      {
+        "type": "p",
+        "text": "The mental model: Screenpipe is the memory, the local model is the brain, and MCP is the nerve that connects them."
+      },
+      {
+        "type": "h",
+        "text": "What is Screenpipe?"
+      },
+      {
+        "type": "p",
+        "text": "Screenpipe is an open-source (MIT) tool that continuously captures your screen and audio, runs OCR on every frame, and writes the results to a local SQLite database with full-text search. Nothing is uploaded — the data lives in ~/.screenpipe on your machine, and it serves a local REST API on http://localhost:3030. It can also expose itself as an MCP server, which is the part that makes this whole thing click."
+      },
+      {
+        "type": "h",
+        "text": "Step 1 — Install Screenpipe"
+      },
+      {
+        "type": "p",
+        "text": "The fastest path is the CLI (the desktop app is great too if you want a visual timeline). I actually drove the install through Claude Code with computer use, but the commands are the standard ones:"
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "# Start the recorder (runs the background daemon)\nnpx screenpipe@latest record\n\n# ...or grab the desktop app from https://screenpi.pe/onboarding"
+      },
+      {
+        "type": "p",
+        "text": "Screenpipe stores everything under ~/.screenpipe and serves an API on port 3030. Verify it’s alive:"
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "# Health check\ncurl http://localhost:3030/health\n\n# The search endpoint needs an API key\nexport SCREENPIPE_API_KEY=$(screenpipe auth token)\ncurl \"http://localhost:3030/search?q=invoice\" \\\n  -H \"Authorization: Bearer $SCREENPIPE_API_KEY\""
+      },
+      {
+        "type": "p",
+        "text": "On Apple Silicon, if the CLI complains, a fresh `npm install screenpipe` pulls the right platform binary; macOS Gatekeeper may also need an `xattr -d com.apple.quarantine` on the binary. The desktop app handles all of that for you."
+      },
+      {
+        "type": "h",
+        "text": "Step 2 — Keep it running on login"
+      },
+      {
+        "type": "p",
+        "text": "A memory tool is only useful if it’s always on. On macOS the clean way is a LaunchAgent that starts the recorder at login and restarts it if it dies. I dropped a plist into ~/Library/LaunchAgents:"
+      },
+      {
+        "type": "code",
+        "lang": "xml",
+        "code": "<!-- ~/Library/LaunchAgents/com.screenpipe.recorder.plist -->\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.screenpipe.recorder</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>/bin/bash</string>\n    <string>-lc</string>\n    <string>exec npx screenpipe@latest record</string>\n  </array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n</dict>\n</plist>"
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "# Load it once; it now starts on every login\nlaunchctl load -w ~/Library/LaunchAgents/com.screenpipe.recorder.plist"
+      },
+      {
+        "type": "p",
+        "text": "One gotcha: only one process can own port 3030. If you already have a recorder running in a terminal, stop it before loading the agent."
+      },
+      {
+        "type": "h",
+        "text": "Step 3 — Run a local model in LM Studio"
+      },
+      {
+        "type": "p",
+        "text": "LM Studio is the easiest way to run local models on a Mac: download it, pull a model, load it. I’m running qwen3.5-27b-claude-4.6-opus-distilled-mlx — a 27B Qwen distill in MLX format (MLX is Apple’s array framework, so it’s tuned for Apple Silicon). On the M5 Max it’s quick, and LM Studio reports a 262k-token context window, which matters once the model starts pulling in screen history."
+      },
+      {
+        "type": "p",
+        "text": "I keep a small model around too (a 4B Gemma) for snappy chats. Big model for reasoning, small model for quick tool calls."
+      },
+      {
+        "type": "h",
+        "text": "Step 4 — Connect Screenpipe to LM Studio over MCP"
+      },
+      {
+        "type": "p",
+        "text": "This is the magic step. LM Studio can act as an MCP host: point it at an MCP server and the loaded model gains a new set of callable tools. Screenpipe ships an MCP server, so we add it to LM Studio’s mcp.json (Integrations → edit mcp.json). The shape looks like this — use the exact command from Screenpipe’s MCP guide:"
+      },
+      {
+        "type": "code",
+        "lang": "json",
+        "code": "{\n  \"mcpServers\": {\n    \"screenpipe\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@screenpipe/mcp@latest\"]\n    }\n  }\n}"
+      },
+      {
+        "type": "p",
+        "text": "Save it and Screenpipe shows up in LM Studio’s Integrations panel as mcp/screenpipe. Toggle it on. The first time the model calls a Screenpipe tool, LM Studio asks you to approve it — tick “always allow” to stop the prompts. That’s it: your local model can now read your screen history."
+      },
+      {
+        "type": "h",
+        "text": "Step 5 — Ask it what you actually did"
+      },
+      {
+        "type": "p",
+        "text": "This is where it stops being a setup guide and starts being useful. I opened a chat, attached the screenpipe tool, and asked it to account for my day:"
+      },
+      {
+        "type": "quote",
+        "text": "How much did I lose today, and what was I working on?"
+      },
+      {
+        "type": "p",
+        "text": "The model didn’t guess. It called Screenpipe’s tools — I could watch it fire create-pipe, then pipe-logs, then list-pipes in the trace, each with a little “Thought for 8.67 seconds” as it reasoned over the results — and then answered from my actual screen data:"
+      },
+      {
+        "type": "code",
+        "lang": "text",
+        "code": "## Apps Used & Time Spent\n| App           | Duration | Main Task           |\n| Brave Browser | 45 min   | Trading & Learning  |\n| Blender       | 10 min   | Character sculpting |\n\n## Key Topics/Content\n- Nifty 50 options trading (₹23,824)\n- Studied \"Primary and Secondary Markets\" course"
+      },
+      {
+        "type": "p",
+        "text": "Every line of that is real, pulled from what was on my screen — the ₹23,824 from my options positions, the Blender character I’d been sculpting, the course I had open. In an earlier test it even correctly named a specific project I’d been building (“faceless-director”, a Remotion video project) and described the terminal work around it, with zero hints from me."
+      },
+      {
+        "type": "h",
+        "text": "Step 6 — Automate it with a pipe"
+      },
+      {
+        "type": "p",
+        "text": "Asking manually is fine, but Screenpipe has “pipes” — small automations that run on a schedule. From the same chat I had the model create one:"
+      },
+      {
+        "type": "ul",
+        "items": [
+          "Name: hourly-activity-review",
+          "Schedule: runs every hour, automatically",
+          "What it does: gathers app usage and time spent, searches the OCR’d screen text, and pulls any audio transcriptions from meetings or videos"
+        ]
+      },
+      {
+        "type": "p",
+        "text": "Now I get a rolling activity log without asking. The same approach produces a daily 10 PM recap or a Sunday weekly review — it’s just another pipe."
+      },
+      {
+        "type": "h",
+        "text": "Bonus: the same trick controls OBS"
+      },
+      {
+        "type": "p",
+        "text": "Because this is all MCP, I added a second server — obs-mcp — and now the same local model can start and stop OBS recordings from a chat message. “Start recording my screen” → the model calls obs_start_record → OBS actually starts capturing. One caveat: OBS exposes a large tool set, so the 27B model spends ~90 seconds chewing through the tool definitions on the first call. A smaller model handles OBS commands much faster."
+      },
+      {
+        "type": "h",
+        "text": "What I learned"
+      },
+      {
+        "type": "ul",
+        "items": [
+          "Privacy is the whole point. Capture, storage, and inference all stay on the laptop, so I can ask about bank and client screens without a second thought.",
+          "MCP is the unlock. Screenpipe and a local model are each useful alone; MCP is what turns “a database of screenshots” into “an assistant that knows my day.”",
+          "The first tool-heavy call is slow. Large MCP tool schemas inflate the prompt, so expect a processing pause on big models — keep a small model for tool-only chats.",
+          "OCR quality drives answer quality. Clear, high-contrast text gets recalled accurately; tiny or low-contrast UI is hit-or-miss.",
+          "Always-on matters. The LaunchAgent does the quiet heavy lifting — without it, there’s no memory to query."
+        ]
+      },
+      {
+        "type": "h",
+        "text": "Takeaways"
+      },
+      {
+        "type": "p",
+        "text": "For the price of a one-time setup, I have a private, offline “second brain” that remembers everything I’ve seen and a local model that can reason over it — no subscription, no cloud, nothing leaving my machine. If you live on your computer and care about privacy, Screenpipe + LM Studio over MCP is one of the highest-leverage local-AI setups I’ve built."
+      },
+      {
+        "type": "p",
+        "text": "Next up: a proper daily-standup generator, and wiring my notes app in as another MCP source so the model has even more context. I’ll write those up too."
+      }
+    ]
+  },
+  {
+    "id": "react-performance-mistakes",
+    "title": "5 React Performance Mistakes I Stopped Making",
+    "date": "2026-06-18",
+    "readingTime": "9 min",
+    "tags": [
+      "React",
+      "Performance",
+      "Frontend"
+    ],
+    "excerpt": "Most React 'optimization' is noise. The real wins come from understanding re-renders and doing less — here are five mistakes I stopped making, from over-memoizing to shipping one giant bundle.",
+    "blocks": [
+      {
+        "type": "p",
+        "text": "For years my idea of optimizing a React app was sprinkling useMemo and useCallback everywhere. It made the code noisier and, it turns out, no faster. The real wins came from understanding when React actually re-renders — and then doing less, not more. Here are five mistakes I stopped making."
+      },
+      {
+        "type": "h",
+        "text": "1. Reaching for useMemo / useCallback everywhere"
+      },
+      {
+        "type": "p",
+        "text": "This is the big one. You can delete most of the useMemo and useCallback calls in a typical app and it will run exactly the same — sometimes slightly faster, because memoization is not free. Every memo stores a value and runs a dependency comparison on each render. For cheap work, the bookkeeping costs more than the thing you are trying to avoid."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "// Trivial child + memo + useCallback that guard nothing expensive.\nconst Title = React.memo(function Title({ text }) {\n  return <h1>{text}</h1>\n})\n\nfunction Page() {\n  // useCallback adds dependency tracking on every render and buys nothing here.\n  const onSave = useCallback(() => save(), [])\n  return <Title text=\"Dashboard\" />\n}"
+      },
+      {
+        "type": "p",
+        "text": "The rule I follow now: write it plainly first. Only add memoization when the Profiler shows a real, repeated cost — an expensive computation or a genuinely heavy child re-rendering too often."
+      },
+      {
+        "type": "h",
+        "text": "2. Passing new objects and functions to memoized children"
+      },
+      {
+        "type": "p",
+        "text": "When you do reach for React.memo, it only helps if every prop keeps a stable reference between renders. React.memo does a shallow comparison; an inline object or arrow function is a brand-new reference each render, so the comparison always fails and the child re-renders anyway. This is the silent killer in most before/after memo post-mortems."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "const Row = React.memo(function Row({ item, style, onSelect }) {\n  return <li style={style} onClick={() => onSelect(item.id)}>{item.name}</li>\n})\n\nfunction List({ items }) {\n  return (\n    <ul>\n      {items.map((item) => (\n        // New object + new function every render -> React.memo never hits.\n        <Row key={item.id} item={item} style={{ padding: 8 }} onSelect={(id) => pick(id)} />\n      ))}\n    </ul>\n  )\n}"
+      },
+      {
+        "type": "p",
+        "text": "Hoist constant objects out of the component, and stabilize callbacks with useCallback (or move them so they are defined once):"
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "const ROW_STYLE = { padding: 8 }                 // hoisted: stable reference\n\nfunction List({ items }) {\n  const onSelect = useCallback((id) => pick(id), [])   // stable across renders\n  return (\n    <ul>\n      {items.map((item) => (\n        <Row key={item.id} item={item} style={ROW_STYLE} onSelect={onSelect} />\n      ))}\n    </ul>\n  )\n}"
+      },
+      {
+        "type": "h",
+        "text": "3. One giant Context (or keeping state too high)"
+      },
+      {
+        "type": "p",
+        "text": "By default, every consumer of a context re-renders whenever the context value changes — even consumers that only read a field that did not change. Stuff user, theme, cart, and a dozen setters into one provider and a single cart update re-renders the entire tree."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "// Any change to ANY field re-renders every consumer of this context.\nconst AppContext = createContext()\n\nfunction App() {\n  const [user, setUser] = useState()\n  const [theme, setTheme] = useState(\"dark\")\n  const [cart, setCart] = useState([])\n  return (\n    <AppContext.Provider value={{ user, theme, cart, setCart }}>\n      <Routes />\n    </AppContext.Provider>\n  )\n}"
+      },
+      {
+        "type": "p",
+        "text": "Split context by update frequency so a fast-changing value cannot drag slow-changing consumers along — and where you can, keep state close to where it is used instead of hoisting everything to the root."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "// theme rarely changes; cart changes a lot — keep them apart.\n<ThemeContext.Provider value={theme}>\n  <CartContext.Provider value={cartValue}>\n    <Routes />\n  </CartContext.Provider>\n</ThemeContext.Provider>"
+      },
+      {
+        "type": "h",
+        "text": "4. Shipping everything in one bundle"
+      },
+      {
+        "type": "p",
+        "text": "A perfectly tuned render loop does not matter if the user is staring at a blank screen waiting for a 2 MB bundle. The most reliable performance win is usually loading less JavaScript up front. Importing your chart library, rich-text editor, and every route statically means every visitor downloads all of it before first paint."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "// Everyone downloads the heavy chart + editor on first paint.\nimport HeavyChart from \"./HeavyChart\"\nimport MarkdownEditor from \"./MarkdownEditor\""
+      },
+      {
+        "type": "p",
+        "text": "Split at routes and behind interaction with React.lazy + Suspense, and dynamic-import heavy libraries only when they are actually used. Lazy-loading modals, drawers, and below-the-fold widgets commonly cuts the initial bundle by around a third."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "import { lazy, Suspense } from \"react\"\n\nconst HeavyChart = lazy(() => import(\"./HeavyChart\"))\n\nfunction Dashboard() {\n  return (\n    <Suspense fallback={<Spinner />}>\n      <HeavyChart />\n    </Suspense>\n  )\n}"
+      },
+      {
+        "type": "h",
+        "text": "5. Rendering long lists badly"
+      },
+      {
+        "type": "p",
+        "text": "Two list mistakes show up constantly. First, using the array index as a key — it breaks reconciliation the moment the list reorders or filters, causing wrong updates and lost input state. Second, mounting thousands of rows at once."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "// Index keys confuse reconciliation when the list reorders or filters.\n{items.map((item, i) => <Card key={i} item={item} />)}"
+      },
+      {
+        "type": "p",
+        "text": "Use a stable, unique id as the key. And for very long lists, do not mount what nobody can see — virtualize so only the visible rows exist in the DOM."
+      },
+      {
+        "type": "code",
+        "lang": "jsx",
+        "code": "// Stable IDs as keys.\n{items.map((item) => <Card key={item.id} item={item} />)}\n\n// 10k+ rows? render only what is visible (e.g. @tanstack/react-virtual)\n// instead of mounting thousands of DOM nodes."
+      },
+      {
+        "type": "h",
+        "text": "The meta-lesson: measure, then do less"
+      },
+      {
+        "type": "p",
+        "text": "Notice the pattern — four of these five are about removing work, not adding it. Before optimizing anything, open the React DevTools Profiler and Lighthouse and find the actual bottleneck; intuition about React performance is wrong more often than not."
+      },
+      {
+        "type": "p",
+        "text": "And looking ahead: the React Compiler (stable in the React 19 era) auto-memoizes components at build time based on the Rules of React, so you can write plain code and let the compiler insert the equivalent of useMemo and React.memo for you — often better than hand-tuning. It does not make these patterns obsolete, but it does make mistake #1 mostly disappear."
+      }
+    ]
+  }
+]
