@@ -1,15 +1,16 @@
 [
   {
-    "id": "day-2",
+    "id": "day-1",
     "date": "2026-06-24",
-    "title": "Day 2 — Remotion builds and tooling setup",
+    "title": "Day 1 — Portfolio config and Git push",
     "youtube": "",
     "mood": "🔧",
-    "notes": "Spent time iterating on the Remotion project, running builds and testing npm scripts. Set up Obsidian as a knowledge management tool for documentation.",
+    "notes": "Worked on personal portfolio site jeet.dev, editing the profile.js configuration file to update identity settings. Pushed changes via git and used Docker for local development. Also explored Web3Forms integration.",
     "tasks": [
-      "Ran npm build scripts in remotion project",
-      "Tested build-in-public.mjs automation script",
-      "Installed Obsidian for note-taking"
+      "Edited profile.js configuration for portfolio site identity settings",
+      "Pushed portfolio changes via git to jeet-v4 repository",
+      "Tested portfolio locally using Docker containers",
+      "Researched Web3Forms integration for forms handling"
     ]
   }
 ]
