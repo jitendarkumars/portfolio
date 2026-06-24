@@ -1,17 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
-import { useInView } from 'framer-motion'
+import { useEffect, useState } from 'react'
 
-// Counts a numeric stat up (e.g. "20+") when it scrolls into view.
+// Counts a numeric stat up (e.g. "20+") once, on mount.
 // Non-numeric values (like "∞") render as-is.
 export default function Counter({ value }) {
   const m = String(value).match(/^(\d+)(.*)$/)
-  const ref = useRef(null)
-  const inView = useInView(ref, { margin: '-20% 0px' })
   const [n, setN] = useState(0)
 
   useEffect(() => {
     if (!m) return
-    if (!inView) { setN(0); return }
     const target = +m[1]
     let start
     let raf
@@ -24,8 +20,8 @@ export default function Counter({ value }) {
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [inView]) // eslint-disable-line
+  }, []) // eslint-disable-line
 
-  if (!m) return <span ref={ref}>{value}</span>
-  return <span ref={ref}>{n}{m[2]}</span>
+  if (!m) return <span>{value}</span>
+  return <span>{n}{m[2]}</span>
 }

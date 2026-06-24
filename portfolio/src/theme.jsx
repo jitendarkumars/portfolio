@@ -7,9 +7,9 @@ export function ThemeProvider({ children }) {
   // inline script in index.html already set (prevents a flash on load).
   const [theme, setTheme] = useState(() => {
     if (typeof document !== 'undefined') {
-      return document.documentElement.getAttribute('data-theme') || 'paper'
+      return document.documentElement.getAttribute('data-theme') || 'ink'
     }
-    return 'paper'
+    return 'ink'
   })
 
   useEffect(() => {

@@ -196,9 +196,10 @@ img { max-width: 100%; display: block; }
 .hero__lead { margin-top: 22px; max-width: 540px; font-size: 1.1rem; color: var(--muted); }
 .hero__lead b { color: var(--ink); }
 .hero__actions { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 14px; }
-.hero__stats { margin-top: 48px; display: flex; flex-wrap: wrap; gap: 0; border: 2px solid var(--line); width: fit-content; background: var(--paper); }
-.hero__stat { padding: 16px 24px; border-right: 2px solid var(--line); }
+.hero__stats { margin-top: 48px; display: grid; grid-template-columns: repeat(3, 1fr); border: 2px solid var(--line); width: fit-content; max-width: 100%; background: var(--panel); }
+.hero__stat { padding: 16px 22px; border-right: 2px solid var(--line); }
 .hero__stat:last-child { border-right: none; }
+@media (max-width: 520px) { .hero__stats { grid-template-columns: 1fr; } .hero__stat { border-right: none; border-bottom: 2px solid var(--line); } .hero__stat:last-child { border-bottom: none; } }
 .hero__stat .num { font-family: var(--font-display); font-size: 1.7rem; font-weight: 700; color: var(--accent); }
 .hero__stat .lbl { font-size: 0.78rem; color: var(--faint); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
 .hero__scroll { margin-top: 46px; display: inline-flex; align-items: center; gap: 10px; color: var(--faint); font-size: 0.78rem; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em; }
@@ -398,6 +399,40 @@ img { max-width: 100%; display: block; }
 .ascii-rule .seg { flex: 1; overflow: hidden; white-space: nowrap; font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 3px; color: var(--faint); opacity: 0.5; user-select: none; }
 .ascii-rule .lbl { font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
 @media (max-width: 760px) { .terminal__screen { aspect-ratio: 4 / 3; } }
+
+/* clickable window controls */
+.terminal__dots i { cursor: pointer; transition: transform 0.12s ease, opacity 0.12s ease; }
+.terminal__dots i:hover { transform: scale(1.3); opacity: 1; }
+
+/* typed "movie" screen */
+.tmovie { position: absolute; inset: 0; margin: 0; padding: 18px 18px 14px; overflow: hidden;
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.4; color: var(--ink-soft);
+  white-space: pre-wrap; word-break: break-word; }
+.tmovie .accent { color: var(--accent); }
+.tmovie .dim { color: var(--faint); }
+.tmovie__caret { color: var(--accent); animation: tcaret 1s steps(1) infinite; }
+@keyframes tcaret { 50% { opacity: 0; } }
+
+.terminal__status .hint { margin-left: auto; opacity: 0.6; }
+
+/* minimized: keep the title bar only */
+.terminal--min .terminal__screen,
+.terminal--min .terminal__status { display: none; }
+
+/* closed: a small reopen card in place of the terminal */
+.terminal-closed { border: 2px dashed var(--line); background: var(--panel); width: 100%;
+  aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center; }
+.terminal-reopen { font-family: var(--font-mono); font-size: 0.8rem; color: var(--accent);
+  border: 2px solid var(--line); padding: 10px 16px; background: transparent; cursor: pointer; transition: 0.15s; }
+.terminal-reopen:hover { background: var(--accent); color: #14110d; }
+
+/* fullscreen overlay */
+.terminal-backdrop { position: fixed; inset: 0; z-index: 190;
+  background: color-mix(in srgb, var(--ink) 72%, transparent); backdrop-filter: blur(3px); }
+.terminal--full { position: fixed; inset: 5vh 5vw; z-index: 200; width: auto; height: 90vh;
+  display: flex; flex-direction: column; }
+.terminal--full .terminal__screen { aspect-ratio: auto; flex: 1; }
+.terminal--full .tmovie { font-size: 18px; line-height: 1.5; padding: 28px; }
 
 /* ============================================================
    SCROLL PROGRESS BAR (framer)

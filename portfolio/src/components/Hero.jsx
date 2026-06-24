@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { profile } from '../data/profile'
 import Socials from './Socials'
-import AsciiScreen from './AsciiScreen'
+import HeroTerminal from './HeroTerminal'
 import Counter from './Counter'
 import Magnetic from './Magnetic'
 
@@ -81,21 +81,9 @@ export default function Hero({ theme }) {
           </div>
         </div>
 
-        {/* signature: a live ASCII render, framed like a terminal */}
+        {/* signature: a typed terminal that cycles through real content */}
         <aside className="hero__aside">
-          <div className="terminal">
-            <div className="terminal__bar">
-              <span className="terminal__dots"><i /><i /><i /></span>
-              <span className="terminal__title">jeet@portfolio: ~/render</span>
-              <span className="terminal__cmd">./jeet --ascii</span>
-            </div>
-            <div className="terminal__screen">
-              <AsciiScreen theme={theme} />
-            </div>
-            <div className="terminal__status">
-              <span className="blink">▸</span> rendering {profile.name.toLowerCase()}.obj — hover to disturb · click to ripple
-            </div>
-          </div>
+          <HeroTerminal />
         </aside>
       </div>
 
