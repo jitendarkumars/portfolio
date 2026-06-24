@@ -36,7 +36,7 @@ function ProjectModal({ project, onClose }) {
       >
         <button className="modal__close" onClick={onClose} aria-label="Close">✕</button>
         <div className="modal__meta">Project · {project.tags.join(' · ')}</div>
-        <h2 className="modal__title">{project.emoji} {project.title}</h2>
+        <h2 className="modal__title">{project.title}</h2>
         <div className="modal__body">
           <p>{project.detail || project.blurb}</p>
           {project.highlights?.length > 0 && (
@@ -89,7 +89,7 @@ export default function Projects() {
           <Reveal key={p.title} delay={(i % 2) * 90} className={`card ${p.featured ? 'project--featured' : ''}`}>
             <button className="project__open" onClick={() => setOpen(p)} aria-label={`Open ${p.title}`}>
               <div className="project__top">
-                <span className="project__emoji">{p.emoji}</span>
+                <span className="project__index">{String(i + 1).padStart(2, '0')}</span>
                 {p.featured && <span className="project__badge">Featured</span>}
               </div>
               <h3 className="project__title">{p.title}</h3>

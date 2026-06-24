@@ -116,24 +116,38 @@ async function fetchDay() {
 
 function digest(items) {
   const apps = new Map()
+  let total = 0
   for (const it of items) {
     const c = it.content || it
     const app = c.app_name || c.appName || 'Unknown'
     const win = c.window_name || c.windowName || ''
     const text = c.text || c.ocr_text || ''
     if (isDeny(app) || isDeny(win)) continue
-    if (!apps.has(app)) apps.set(app, { count: 0, windows: new Set(), samples: [] })
+    total++
+    if (!apps.has(app)) apps.set(app, { count: 0, windows: new Map(), samples: [] })
     const a = apps.get(app)
     a.count++
-    if (win) a.windows.add(win.slice(0, 80))
-    if (text && a.samples.length < 4) a.samples.push(redact(text))
+    if (win) {
+      const w = win.slice(0, 90)
+      a.windows.set(w, (a.windows.get(w) || 0) + 1)
+    }
+    if (text && a.samples.length < 6) {
+      const r = redact(text)
+      if (r.trim()) a.samples.push(r)
+    }
   }
+  // window titles are the strongest signal of what was actually worked on
   const top = [...apps.entries()].sort((x, y) => y[1].count - x[1].count).slice(0, 8)
   return top
     .map(([app, a]) => {
-      const wins = [...a.windows].slice(0, 5).join(' | ')
-      const samples = a.samples.join(' / ')
-      return `- ${app} (${a.count} frames)` + (wins ? `\n  windows: ${wins}` : '') + (samples ? `\n  text: ${samples}` : '')
+      const share = total ? Math.round((a.count / total) * 100) : 0
+      const wins = [...a.windows.entries()].sort((x, y) => y[1] - x[1]).slice(0, 6).map(([w]) => w).join(' | ')
+      const samples = a.samples.slice(0, 4).join('  ·  ')
+      return (
+        `• ${app} — ~${share}% of screen time` +
+        (wins ? `\n   windows: ${wins}` : '') +
+        (samples ? `\n   on screen: ${samples}` : '')
+      )
     })
     .join('\n')
 }
@@ -159,7 +173,7 @@ async function lmChat(messages, responseFormat) {
     },
     body: JSON.stringify({
       model: LM_MODEL,
-      temperature: 0.4,
+      temperature: 0.2,
       max_tokens: 1200,
       response_format: responseFormat,
       messages,
@@ -183,12 +197,20 @@ function parseLooseJson(s) {
 
 async function summarize(digestText) {
   const system =
-    'You write a short, first-person "building in public" daily log entry for a software developer, ' +
-    'based on a digest of their screen activity. STRICT RULES: only describe software development, ' +
-    'design, DevOps, and learning work. NEVER mention money, trades, P&L, balances, amounts, banks, ' +
-    'brokers, stock tickers, passwords, account numbers, client names, or personal messages. If there ' +
-    'is little dev activity, call it a light build day. Keep it humble and concrete. Output ONLY the ' +
-    'JSON object, no reasoning or extra text. Shape: {"title": string (<= 7 words, no "Day N" prefix), ' +
+    'You write a short, first-person "building in public" daily log for a software developer, strictly ' +
+    'from a digest of their screen activity (apps, window titles, and text that was on screen).\n' +
+    'ACCURACY (most important): Use ONLY what the digest clearly supports. Do NOT invent actions, ' +
+    'commands, builds, tests, deployments, or tools that are not clearly visible in the data. Identify ' +
+    'the real projects/apps/files from the window titles and name them specifically. A task must be ' +
+    'something the data actually shows the person doing — if the evidence is weak, describe it at a ' +
+    'higher level ("worked on X", "read about Y") instead of inventing specifics, and NEVER claim a ' +
+    'build/test/deploy ran unless its output is clearly present. Prefer 2-3 accurate tasks over more ' +
+    'speculative ones. Be concrete and humble.\n' +
+    'PRIVACY: only software development, design, DevOps, and learning work. NEVER mention money, trades, ' +
+    'P&L, balances, amounts, banks, brokers, tickers, passwords, account numbers, client names, or ' +
+    'personal messages.\n' +
+    'If there is little real dev activity, say it was a light day rather than padding it.\n' +
+    'Output ONLY the JSON object, no reasoning. Shape: {"title": string (<= 7 words, no "Day N" prefix), ' +
     '"summary": string (2-3 sentences), "tasks": string[] (2-4 short items), "mood": string (one emoji)}.'
   const messages = [
     { role: 'system', content: system },
@@ -271,14 +293,13 @@ async function main() {
 
   const out = await summarize(digestText)
   const vlog = await readCollection('vlog')
-
-  // next "Day N" number from existing titles
-  const nums = vlog
-    .map((v) => (String(v.title).match(/Day\s+(\d+)/i) || [])[1])
-    .filter(Boolean)
-    .map(Number)
-  const dayN = (nums.length ? Math.max(...nums) : vlog.length) + 1
   const date = today()
+
+  // "Day N" numbering — reuse today's number on a same-day re-run, else max + 1
+  const dayNum = (v) => Number((String(v && v.title).match(/Day\s+(\d+)/i) || [])[1]) || null
+  const replacingToday = vlog[0] && vlog[0].date === date
+  const maxDay = vlog.map(dayNum).filter(Boolean).reduce((a, b) => Math.max(a, b), 0)
+  const dayN = replacingToday ? dayNum(vlog[0]) || maxDay || 1 : maxDay + 1
 
   const entry = {
     id: `day-${dayN}`,
@@ -291,7 +312,7 @@ async function main() {
   }
 
   // If today's entry already exists (re-run), replace it instead of duplicating.
-  const next = vlog[0] && vlog[0].date === date ? [entry, ...vlog.slice(1)] : [entry, ...vlog]
+  const next = replacingToday ? [entry, ...vlog.slice(1)] : [entry, ...vlog]
   await writeCollection('vlog', next)
   log(`Wrote entry: ${entry.title}`)
 

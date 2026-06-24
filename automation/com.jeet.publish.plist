@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jeet.publish</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>bash /Users/jitendarkumar/Documents/jeet-v4/automation/publish.sh</string>
+  </array>
+  <!-- Deploys after the blog task writes (which runs ~09:30 & ~17:30). -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/jitendarkumar/Documents/jeet-v4/automation/publish.log</string>
+  <key>StandardErrorPath</key><string>/Users/jitendarkumar/Documents/jeet-v4/automation/publish.log</string>
+</dict>
+</plist>

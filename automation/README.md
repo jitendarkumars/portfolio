@@ -92,3 +92,54 @@ to never mention money, trades, balances, brokers, clients, or personal messages
 It's still **auto-publishing to a public site**, so review `build-in-public.log`
 periodically. To switch to review-before-publish later, run with `NO_PUSH=1` on a
 schedule and approve manually.
+
+---
+
+# Auto blog generation
+
+Writes technical blog posts and publishes them, **2 per day** (~09:30 and ~17:30),
+using a **Cowork scheduled task** (Claude does the writing with web research — much
+higher quality than a local model). Claude picks the next topic from a curated
+**topic bank** (`automation/blog-topics.json`), researches it, and writes the post
+into `blog.json`. A tiny **publisher** then commits & pushes so Vercel rebuilds.
+Categories rotate automatically (tool how-to, coding/system-design, AI/automation,
+real project deep-dives).
+
+How the pieces fit:
+- **Scheduled task `portfolio-blog`** (in the app's "Scheduled" sidebar) — writes one
+  researched post per run into `blog.json` and marks the topic used. It does not run git.
+- **`publish.sh` + `com.jeet.publish.plist`** — a macOS LaunchAgent that commits &
+  pushes any content changes (10:00 & 18:00 daily).
+- **`blog-topics.json`** — the curated topic bank.
+
+> Note: `generate-blogs.mjs` and `com.jeet.blogs.plist` (the older local-LM-Studio
+> generator) are **superseded** by the scheduled task — don't install that plist.
+
+## Set up the publisher (deploys what the task writes)
+
+The `portfolio-blog` scheduled task is already created. Install the publisher so the
+posts actually go live:
+
+```bash
+cp ~/Documents/jeet-v4/automation/com.jeet.publish.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.jeet.publish.plist
+```
+
+Try the whole flow now: open the **Scheduled** sidebar → **Run** `portfolio-blog` once
+→ check the new post atop `blog.json` (`npm run dev` to preview) → then
+`bash ~/Documents/jeet-v4/automation/publish.sh` to deploy it.
+
+The task runs only while the Cowork app is open; if it's closed at the scheduled time
+it runs on next launch, and the next publisher run picks it up.
+
+## Keeping it fed
+
+Each post marks its topic `"used": true`. When fewer than ~4 unused topics remain,
+the log prints a warning — **add more entries to `blog-topics.json`** (same shape:
+`{ "used": false, "category": "tool|practice|ai|project", "title", "tags": [], "brief" }`).
+The `brief` is the backbone the model expands, so write a few real, specific points.
+Project deep-dives should only describe projects you actually built.
+
+> Heads-up: these are auto-published with a local model. Skim them now and then —
+> if one reads thin, just delete that entry from `blog.json` and tighten the topic's
+> brief in the bank.

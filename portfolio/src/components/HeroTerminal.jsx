@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { profile } from '../data/profile'
 import { projects } from '../data/projects'
 import { now } from '../data/now'
@@ -141,10 +142,8 @@ export default function HeroTerminal() {
     )
   }
 
-  return (
-    <>
-      {full && <div className="terminal-backdrop" onClick={() => setFull(false)} />}
-      <div className={`terminal ${minimized ? 'terminal--min' : ''} ${full ? 'terminal--full' : ''}`}>
+  const term = (
+    <div className={`terminal ${minimized ? 'terminal--min' : ''} ${full ? 'terminal--full' : ''}`}>
         <div className="terminal__bar">
           <span className="terminal__dots">
             <i title="Close" role="button" aria-label="Close terminal" onClick={() => setClosed(true)} />
@@ -174,6 +173,17 @@ export default function HeroTerminal() {
           <span className="hint">hover: pause · click: next</span>
         </div>
       </div>
-    </>
   )
+
+  // Fullscreen escapes main's stacking context (so it covers the fixed nav).
+  if (full) {
+    return createPortal(
+      <>
+        <div className="terminal-backdrop" onClick={() => setFull(false)} />
+        {term}
+      </>,
+      document.body
+    )
+  }
+  return term
 }

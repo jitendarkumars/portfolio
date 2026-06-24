@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jeet.blogs</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>node /Users/jitendarkumar/Documents/jeet-v4/automation/generate-blogs.mjs</string>
+  </array>
+  <!-- Two posts a day: one at 09:30, one at 17:30 (each run writes 1 post). -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>17</integer><key>Minute</key><integer>30</integer></dict>
+  </array>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/jitendarkumar/Documents/jeet-v4/automation/blog.log</string>
+  <key>StandardErrorPath</key><string>/Users/jitendarkumar/Documents/jeet-v4/automation/blog.log</string>
+</dict>
+</plist>
