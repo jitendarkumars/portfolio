@@ -32,6 +32,10 @@ export default function ContactForm() {
 
     if (endpoint.provider === 'web3forms') {
       data.append('access_key', cfg.web3formsKey)
+      data.append('from_name', data.get('name') || 'Portfolio visitor')
+      data.append('subject', `New portfolio message from ${data.get('name') || 'a visitor'}`)
+      const visitor = data.get('email')
+      if (visitor) data.append('replyto', visitor) // reply straight to the sender
     }
 
     setStatus('submitting')
@@ -67,7 +71,7 @@ export default function ContactForm() {
         <textarea id="cf-message" name="message" required placeholder="What's on your mind?" />
       </div>
 
-      {/* Honeypot field to deter spam bots (kept off-screen). */}
+      {/* Honeypots to deter spam bots (Formspree uses _gotcha, Web3Forms uses botcheck). */}
       <input
         type="text"
         name="_gotcha"
@@ -76,6 +80,7 @@ export default function ContactForm() {
         style={{ position: 'absolute', left: '-9999px' }}
         aria-hidden="true"
       />
+      <input type="checkbox" name="botcheck" tabIndex="-1" autoComplete="off" style={{ display: 'none' }} aria-hidden="true" />
 
       <button className="btn btn--primary" type="submit" disabled={status === 'submitting'}>
         {status === 'submitting' ? 'Sending…' : 'Send message'}

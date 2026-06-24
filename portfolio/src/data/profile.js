@@ -28,8 +28,8 @@ export const profile = {
   // email (no backend needed). Leave both empty and the form falls back to
   // opening the visitor's mail app. See README → "Make the contact form send email".
   contact: {
-    formspreeId: '', // e.g. 'xqkrabcd'  → sign up at https://formspree.io
-    web3formsKey: '', // e.g. '2b0c1d…'  → free key at https://web3forms.com
+    formspreeId: '',
+    web3formsKey: 'ca28a525-0e6b-4bc7-ae93-62fcea2803f1',
   },
 
   // Used in the About section.
