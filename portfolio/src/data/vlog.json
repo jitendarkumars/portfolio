@@ -1,5 +1,19 @@
 [
   {
+    "id": "day-2",
+    "date": "2026-06-25",
+    "title": "Day 2 — ChronoVerse planning and quizwhiz dev",
+    "youtube": "",
+    "mood": "🎮",
+    "notes": "Spent most of the day planning the ChronoVerse game concept in Antigravity and Claude, discussing design direction. Also ran the quizwhiz Next.js dev server and researched Baamboozle's game platform in the browser.",
+    "tasks": [
+      "Planned ChronoVerse: The Time Architect game concept in Antigravity",
+      "Discussed design approach for ChronoVerse with Claude",
+      "Ran quizwhiz Next.js dev server (npm run dev)",
+      "Researched Baamboozle platform and riddles in browser"
+    ]
+  },
+  {
     "id": "day-1",
     "date": "2026-06-24",
     "title": "Day 1 — Portfolio config and Git push",
