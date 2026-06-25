@@ -1,0 +1,711 @@
+[
+  {
+    "id": "database-indexing-in-depth",
+    "title": "Database Indexing, in depth",
+    "excerpt": "How indexes really work, the types and trade-offs, the edge cases where they silently fail, and the anti-patterns that cost you.",
+    "tags": [
+      "Databases",
+      "Performance",
+      "System Design"
+    ],
+    "date": "2026-06-25",
+    "slides": [
+      {
+        "tag": "DATABASES",
+        "title": "Database Indexing, in depth",
+        "body": {
+          "kind": "cover",
+          "subtitle": "How indexes really work — and when they quietly fail.",
+          "chips": [
+            "B-Tree",
+            "Composite",
+            "Covering",
+            "EXPLAIN"
+          ]
+        }
+      },
+      {
+        "tag": "THE PROBLEM",
+        "title": "No index means read every row",
+        "intro": "A query without a usable index forces a sequential scan — the database reads the whole table.",
+        "body": {
+          "kind": "callout",
+          "label": "WHY IT MATTERS",
+          "text": "Seq scan is O(n). A B-tree lookup is O(log n). On 10M rows that is ~23 comparisons versus 10,000,000."
+        }
+      },
+      {
+        "tag": "CONCEPT",
+        "title": "What an index actually is",
+        "intro": "Not magic — a maintained, sorted data structure that lives beside your table.",
+        "body": {
+          "kind": "bullets",
+          "items": [
+            {
+              "h": "A sorted copy",
+              "t": "of the indexed column(s), stored as a B-tree."
+            },
+            {
+              "h": "Plus a pointer",
+              "t": "to the real row (heap location or primary key)."
+            },
+            {
+              "h": "Auto-updated",
+              "t": "on every INSERT / UPDATE / DELETE — the write cost."
+            },
+            {
+              "h": "Costs disk",
+              "t": "it is separate from the table and takes space."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "MECHANICS",
+        "title": "How a B-tree lookup works",
+        "body": {
+          "kind": "steps",
+          "steps": [
+            {
+              "h": "Start at the root",
+              "t": "one page holding key ranges."
+            },
+            {
+              "h": "Follow a branch",
+              "t": "binary-search to the child whose range holds your key."
+            },
+            {
+              "h": "Reach a leaf",
+              "t": "leaves store keys in sorted order with row pointers."
+            },
+            {
+              "h": "Fetch the row",
+              "t": "follow the pointer to the heap — unless it is index-only."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "TYPES",
+        "title": "Index types and when to use them",
+        "body": {
+          "kind": "table",
+          "cols": [
+            "Type",
+            "Best for"
+          ],
+          "rows": [
+            [
+              "B-Tree",
+              "equality + range + ORDER BY (default)"
+            ],
+            [
+              "Hash",
+              "exact equality only"
+            ],
+            [
+              "GIN",
+              "arrays, JSONB, full-text"
+            ],
+            [
+              "BRIN",
+              "huge, naturally-ordered tables"
+            ],
+            [
+              "Partial",
+              "a hot subset of the rows"
+            ]
+          ]
+        }
+      },
+      {
+        "tag": "SYNTAX",
+        "title": "Creating indexes",
+        "body": {
+          "kind": "code",
+          "lang": "sql",
+          "code": "-- single column\nCREATE INDEX idx_users_email ON users(email);\n\n-- composite (order matters!)\nCREATE INDEX idx_orders_user_created\n  ON orders(user_id, created_at DESC);\n\n-- partial: only index what you query\nCREATE INDEX idx_active ON users(last_seen)\n  WHERE status = 'active';"
+        }
+      },
+      {
+        "tag": "DECISION",
+        "title": "Should you index this column?",
+        "body": {
+          "kind": "decision",
+          "rows": [
+            {
+              "q": "Used in WHERE / JOIN / ORDER BY?",
+              "yes": "candidate",
+              "no": "skip it"
+            },
+            {
+              "q": "High cardinality (many distinct values)?",
+              "yes": "good fit",
+              "no": "low payoff"
+            },
+            {
+              "q": "Table is read-heavy?",
+              "yes": "index it",
+              "no": "weigh write cost"
+            }
+          ]
+        }
+      },
+      {
+        "tag": "COMPOSITE",
+        "title": "The left-prefix rule",
+        "intro": "A composite index on (a, b, c) can serve queries that use a left prefix of the columns:",
+        "body": {
+          "kind": "bullets",
+          "items": [
+            {
+              "h": "(a)",
+              "t": "yes"
+            },
+            {
+              "h": "(a, b)",
+              "t": "yes"
+            },
+            {
+              "h": "(a, b, c)",
+              "t": "yes"
+            },
+            {
+              "h": "(b) or (b, c)",
+              "t": "no — the leading column is missing"
+            }
+          ]
+        }
+      },
+      {
+        "tag": "GOTCHA",
+        "title": "Column order is not cosmetic",
+        "body": {
+          "kind": "callout",
+          "label": "REMEMBER",
+          "text": "(user_id, created_at) and (created_at, user_id) are different indexes for different queries. Put the equality column first, the range or sort column second."
+        }
+      },
+      {
+        "tag": "OBSERVE",
+        "title": "Read the plan with EXPLAIN",
+        "body": {
+          "kind": "code",
+          "lang": "sql",
+          "code": "EXPLAIN ANALYZE\nSELECT * FROM orders\nWHERE user_id = 42\nORDER BY created_at DESC\nLIMIT 20;\n\n-- want:  Index Scan   (good)\n-- avoid: Seq Scan     (bad on big tables)"
+        }
+      },
+      {
+        "tag": "SCANS",
+        "title": "Index vs Seq vs Bitmap scan",
+        "body": {
+          "kind": "compare",
+          "cols": [
+            {
+              "title": "Index Scan",
+              "accent": true,
+              "items": [
+                "few rows match",
+                "walks the B-tree",
+                "random heap I/O"
+              ]
+            },
+            {
+              "title": "Seq Scan",
+              "items": [
+                "many rows match",
+                "reads whole table",
+                "wins above ~10%"
+              ]
+            },
+            {
+              "title": "Bitmap",
+              "items": [
+                "medium selectivity",
+                "builds a page bitmap",
+                "a middle ground"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "tag": "IMPACT",
+        "title": "Before vs after an index",
+        "intro": "Illustrative numbers — a 5M-row table, same query.",
+        "body": {
+          "kind": "metrics",
+          "items": [
+            {
+              "label": "Query time",
+              "from": "1250",
+              "to": "4",
+              "unit": "ms"
+            },
+            {
+              "label": "Rows scanned",
+              "from": "5000000",
+              "to": "20"
+            },
+            {
+              "label": "Buffers read",
+              "from": "61000",
+              "to": "8"
+            }
+          ]
+        }
+      },
+      {
+        "tag": "EDGE CASES",
+        "title": "When your index is ignored",
+        "body": {
+          "kind": "numbered",
+          "items": [
+            {
+              "h": "Function on the column",
+              "t": "WHERE lower(email)=... skips an index on email — use an expression index."
+            },
+            {
+              "h": "Leading wildcard",
+              "t": "LIKE '%term' cannot use a normal B-tree."
+            },
+            {
+              "h": "Type mismatch",
+              "t": "comparing text to int forces a cast and drops the index."
+            },
+            {
+              "h": "Low cardinality",
+              "t": "a boolean or status column rarely helps."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "ANTI-PATTERNS",
+        "title": "Mistakes that cost you",
+        "body": {
+          "kind": "numbered",
+          "items": [
+            {
+              "h": "Indexing everything",
+              "t": "every index slows writes and eats disk."
+            },
+            {
+              "h": "Redundant indexes",
+              "t": "(a) is already covered by (a, b) — drop it."
+            },
+            {
+              "h": "Ignoring write load",
+              "t": "on write-heavy tables each index is a tax."
+            },
+            {
+              "h": "Never measuring",
+              "t": "add an index, then EXPLAIN to confirm it is used."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "PRO MOVE",
+        "title": "Covering & index-only scans",
+        "intro": "Put everything the query needs into the index so it never touches the table.",
+        "body": {
+          "kind": "bullets",
+          "items": [
+            {
+              "h": "INCLUDE columns",
+              "t": "CREATE INDEX ... INCLUDE (total) avoids the heap fetch."
+            },
+            {
+              "h": "Index-only scan",
+              "t": "the planner reads only the index — far less I/O."
+            },
+            {
+              "h": "Best for",
+              "t": "hot read paths that return a few columns."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "CHEATSHEET",
+        "title": "Indexing, at a glance",
+        "body": {
+          "kind": "table",
+          "cols": [
+            "Do this",
+            "Because"
+          ],
+          "rows": [
+            [
+              "Index WHERE / JOIN / ORDER BY cols",
+              "that is what the planner can use"
+            ],
+            [
+              "Equality first, range second",
+              "matches B-tree traversal"
+            ],
+            [
+              "Use partial & covering indexes",
+              "smaller, faster, index-only"
+            ],
+            [
+              "EXPLAIN ANALYZE every time",
+              "confirm the index is actually hit"
+            ],
+            [
+              "Drop unused / duplicate",
+              "they only cost you on writes"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "caching-from-browser-to-database",
+    "title": "Caching: from browser to database",
+    "excerpt": "Every layer that makes apps fast — patterns, invalidation, the cache-stampede edge case, and the anti-patterns that turn caches into bugs.",
+    "tags": [
+      "Performance",
+      "System Design",
+      "Backend"
+    ],
+    "date": "2026-06-25",
+    "slides": [
+      {
+        "tag": "PERFORMANCE",
+        "title": "Caching: from browser to database",
+        "body": {
+          "kind": "cover",
+          "subtitle": "Every layer that makes apps fast — and how each one bites back.",
+          "chips": [
+            "CDN",
+            "Redis",
+            "TTL",
+            "Invalidation"
+          ]
+        }
+      },
+      {
+        "tag": "THE LAYERS",
+        "title": "Where a response can be cached",
+        "body": {
+          "kind": "steps",
+          "steps": [
+            {
+              "h": "Browser cache",
+              "t": "on the user device, driven by HTTP headers."
+            },
+            {
+              "h": "CDN / edge",
+              "t": "a copy close to the user, in global PoPs."
+            },
+            {
+              "h": "App cache",
+              "t": "in-memory or Redis / Memcached."
+            },
+            {
+              "h": "Database cache",
+              "t": "query results plus the OS page cache."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "THE CORE IDEA",
+        "title": "Caching trades freshness for speed",
+        "body": {
+          "kind": "callout",
+          "label": "THE TRADE-OFF",
+          "text": "A cache is a faster copy that may be stale. Every caching decision is really a decision about how much staleness you can tolerate."
+        }
+      },
+      {
+        "tag": "PATTERN",
+        "title": "Cache-aside (lazy loading)",
+        "intro": "The default for most apps — the application owns the cache.",
+        "body": {
+          "kind": "bullets",
+          "items": [
+            {
+              "h": "Read",
+              "t": "check cache, on a miss read the DB, populate, return."
+            },
+            {
+              "h": "Write",
+              "t": "write the DB, then invalidate or update the key."
+            },
+            {
+              "h": "Pro",
+              "t": "simple, and only caches what is actually used."
+            },
+            {
+              "h": "Con",
+              "t": "first read is slow; stale risk on bad invalidation."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "WRITE PATHS",
+        "title": "Three ways to handle writes",
+        "body": {
+          "kind": "compare",
+          "cols": [
+            {
+              "title": "Write-through",
+              "accent": true,
+              "items": [
+                "cache + DB together",
+                "always consistent",
+                "slower writes"
+              ]
+            },
+            {
+              "title": "Write-back",
+              "items": [
+                "cache now, flush later",
+                "fast writes",
+                "data-loss risk"
+              ]
+            },
+            {
+              "title": "Cache-aside",
+              "items": [
+                "app manages it",
+                "flexible",
+                "stale risk"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "tag": "CODE",
+        "title": "Cache-aside in practice",
+        "body": {
+          "kind": "code",
+          "lang": "js",
+          "code": "async function getUser(id) {\n  const key = 'user:' + id\n  const hit = await redis.get(key)\n  if (hit) return JSON.parse(hit)\n\n  const user = await db.users.find(id)\n  // 5-minute TTL\n  await redis.set(key, JSON.stringify(user), 'EX', 300)\n  return user\n}"
+        }
+      },
+      {
+        "tag": "TTL",
+        "title": "TTL: the simplest invalidation",
+        "intro": "Let entries expire instead of tracking every change.",
+        "body": {
+          "kind": "bullets",
+          "items": [
+            {
+              "h": "Short TTL",
+              "t": "fresher data, more misses, more DB load."
+            },
+            {
+              "h": "Long TTL",
+              "t": "faster, but staler."
+            },
+            {
+              "h": "Rule of thumb",
+              "t": "match the TTL to how often the data really changes."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "INVALIDATION",
+        "title": "The four ways to invalidate",
+        "intro": "\"There are only two hard things in CS...\" — this is one of them.",
+        "body": {
+          "kind": "numbered",
+          "items": [
+            {
+              "h": "Expiry (TTL)",
+              "t": "easiest; eventually consistent."
+            },
+            {
+              "h": "Write-time eviction",
+              "t": "delete the key on update — precise, but easy to miss a path."
+            },
+            {
+              "h": "Versioned keys",
+              "t": "embed a version in the key and bump it."
+            },
+            {
+              "h": "Event-driven",
+              "t": "publish change events; subscribers evict."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "EDGE CASE",
+        "title": "Cache stampede (thundering herd)",
+        "body": {
+          "kind": "callout",
+          "label": "THE BIG ONE",
+          "text": "A hot key expires, thousands of requests miss at the same instant, they all hit the database together, and it falls over."
+        }
+      },
+      {
+        "tag": "STAMPEDE FIXES",
+        "title": "Taming the herd",
+        "body": {
+          "kind": "numbered",
+          "items": [
+            {
+              "h": "Lock / single-flight",
+              "t": "the first miss recomputes; others wait for it."
+            },
+            {
+              "h": "Stale-while-revalidate",
+              "t": "serve stale, refresh in the background."
+            },
+            {
+              "h": "TTL jitter",
+              "t": "randomize expiry so keys do not die together."
+            },
+            {
+              "h": "Pre-warm",
+              "t": "refresh hot keys before they expire."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "EDGE CASES",
+        "title": "Other ways caches bite",
+        "body": {
+          "kind": "numbered",
+          "items": [
+            {
+              "h": "Stale reads",
+              "t": "a user updates data but still sees the old value."
+            },
+            {
+              "h": "Cache penetration",
+              "t": "misses for keys that never exist hit the DB — cache the null."
+            },
+            {
+              "h": "Hot key",
+              "t": "one key takes all the traffic — shard or replicate it."
+            },
+            {
+              "h": "Big keys",
+              "t": "huge values stall Redis — split them up."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "HTTP",
+        "title": "Browser & CDN caching",
+        "intro": "Controlled entirely by response headers.",
+        "body": {
+          "kind": "bullets",
+          "items": [
+            {
+              "h": "Cache-Control",
+              "t": "max-age, s-maxage (CDN), no-store."
+            },
+            {
+              "h": "ETag",
+              "t": "If-None-Match returns 304 — cheap revalidation."
+            },
+            {
+              "h": "Immutable assets",
+              "t": "hash the filename and cache it forever."
+            },
+            {
+              "h": "stale-while-revalidate",
+              "t": "serve fast, refresh quietly."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "DECISION",
+        "title": "Should you cache this?",
+        "body": {
+          "kind": "decision",
+          "rows": [
+            {
+              "q": "Read far more than written?",
+              "yes": "great fit",
+              "no": "maybe skip"
+            },
+            {
+              "q": "Can tolerate any staleness?",
+              "yes": "cache it",
+              "no": "be careful"
+            },
+            {
+              "q": "Expensive to compute or fetch?",
+              "yes": "big win",
+              "no": "low payoff"
+            }
+          ]
+        }
+      },
+      {
+        "tag": "ANTI-PATTERNS",
+        "title": "Caching mistakes",
+        "body": {
+          "kind": "numbered",
+          "items": [
+            {
+              "h": "Caching everything",
+              "t": "memory fills with cold keys — set an LRU eviction policy."
+            },
+            {
+              "h": "No invalidation plan",
+              "t": "stale data is often worse than slow data."
+            },
+            {
+              "h": "Per-user data in shared layers",
+              "t": "leaks one user’s data to another."
+            },
+            {
+              "h": "Ignoring the miss path",
+              "t": "design for the cold cache, not just the warm one."
+            }
+          ]
+        }
+      },
+      {
+        "tag": "CHEATSHEET",
+        "title": "Caching, at a glance",
+        "body": {
+          "kind": "table",
+          "cols": [
+            "Layer",
+            "Reach",
+            "Invalidate via"
+          ],
+          "rows": [
+            [
+              "Browser",
+              "one user",
+              "Cache-Control / ETag"
+            ],
+            [
+              "CDN",
+              "a region",
+              "s-maxage / purge"
+            ],
+            [
+              "Redis",
+              "all servers",
+              "TTL / evict / version"
+            ],
+            [
+              "DB cache",
+              "one database",
+              "automatic"
+            ]
+          ]
+        }
+      }
+    ]
+  }
+]

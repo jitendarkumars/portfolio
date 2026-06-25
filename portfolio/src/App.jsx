@@ -12,6 +12,8 @@ import ScrollToTop from './components/ScrollToTop'
 import Home from './components/Home'
 import BlogIndex from './components/BlogIndex'
 import BlogPost from './components/BlogPost'
+import SlidesIndex from './components/SlidesIndex'
+import SlideDeck from './components/SlideDeck'
 
 function Shell() {
   const { theme } = useTheme()
@@ -34,6 +36,8 @@ function Shell() {
           <Route path="/" element={<Home />} />
           <Route path="/blog" element={<BlogIndex />} />
           <Route path="/blog/:id" element={<BlogPost />} />
+          <Route path="/slides" element={<SlidesIndex />} />
+          <Route path="/slides/:id" element={<SlideDeck />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

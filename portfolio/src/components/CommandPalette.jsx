@@ -18,9 +18,12 @@ const navItems = [
   { id: 'about', label: 'About' },
   { id: 'now', label: 'Now' },
   { id: 'projects', label: 'Projects' },
-  { id: 'blog', label: 'Blog', to: '/blog' },
+  { id: 'blog', label: 'Blog' },
+  { id: 'slides', label: 'Slides' },
   { id: 'vlog', label: 'Daily Log' },
   { id: 'contact', label: 'Contact' },
+  { id: 'blog-all', label: 'View all posts', to: '/blog' },
+  { id: 'slides-all', label: 'View all decks', to: '/slides' },
 ]
 
 function scrollToId(id) {
@@ -46,8 +49,8 @@ export default function CommandPalette({ open, setOpen }) {
       keywords: n.label.toLowerCase(),
       Icon: ArrowRightIcon,
       perform: () => {
-        if (n.to === '/blog') {
-          navigate('/blog')
+        if (n.to && n.to !== '/') {
+          navigate(n.to)
         } else if (n.id === 'top') {
           if (location.pathname !== '/') navigate('/')
           else window.scrollTo({ top: 0, behavior: 'smooth' })

@@ -10,6 +10,7 @@ import Marquee from './Marquee'
 import Now from './Now'
 import Projects from './Projects'
 import Blog from './Blog'
+import SlidesSection from './SlidesSection'
 import Vlog from './Vlog'
 import Testimonials from './Testimonials'
 import Contact from './Contact'
@@ -80,6 +81,8 @@ export default function Home() {
       <Projects />
       <AsciiRule label="~/blog" />
       <Blog />
+      <AsciiRule label="~/slides" />
+      <SlidesSection />
       <AsciiRule label="~/daily-log" />
       <Vlog />
       {testimonials.length > 0 && (

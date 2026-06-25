@@ -19,6 +19,10 @@ const template = fs.readFileSync(path.join(DIST, 'index.html'), 'utf8')
 const posts = JSON.parse(
   fs.readFileSync(path.join(__dirname, 'src', 'data', 'blog.json'), 'utf8')
 )
+let decks = []
+try {
+  decks = JSON.parse(fs.readFileSync(path.join(__dirname, 'src', 'data', 'slides.json'), 'utf8'))
+} catch {}
 
 const escAttr = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -133,4 +137,61 @@ for (const post of posts) {
   )
 }
 
-console.log('prerendered: / , /blog , and ' + posts.length + ' posts')
+// 4) Slides index
+writeRoute(
+  '/slides',
+  render({
+    pathName: '/slides',
+    title: 'Visual explainers — Jitendar Kumar (Jeet)',
+    description:
+      'Swipeable, slide-style explainers of engineering concepts — pagination, auth, system design, AI, and more.',
+  })
+)
+
+// 5) Each deck
+for (const deck of decks) {
+  writeRoute(
+    '/slides/' + deck.id,
+    render({
+      pathName: '/slides/' + deck.id,
+      title: deck.title + ' — Jitendar Kumar',
+      description: deck.excerpt,
+      type: 'article',
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        headline: deck.title,
+        description: deck.excerpt,
+        datePublished: deck.date,
+        keywords: (deck.tags || []).join(', '),
+        author: { '@type': 'Person', name: 'Jitendar Kumar', url: SITE },
+        url: SITE + '/slides/' + deck.id,
+      },
+    })
+  )
+}
+
+// 6) sitemap.xml — regenerated each build so it stays in sync with content
+const today = new Date().toISOString().slice(0, 10)
+const urls = [
+  { loc: SITE + '/', priority: '1.0', changefreq: 'weekly' },
+  { loc: SITE + '/blog', priority: '0.8', changefreq: 'daily' },
+  { loc: SITE + '/slides', priority: '0.8', changefreq: 'weekly' },
+  ...posts.map((p) => ({ loc: SITE + '/blog/' + p.id, lastmod: p.date, priority: '0.7', changefreq: 'monthly' })),
+  ...decks.map((d) => ({ loc: SITE + '/slides/' + d.id, lastmod: d.date, priority: '0.7', changefreq: 'monthly' })),
+]
+const sitemap =
+  '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+  urls
+    .map(
+      (u) =>
+        '  <url><loc>' + u.loc + '</loc><lastmod>' + (u.lastmod || today) +
+        '</lastmod><changefreq>' + u.changefreq + '</changefreq><priority>' + u.priority + '</priority></url>'
+    )
+    .join('\n') +
+  '\n</urlset>\n'
+fs.writeFileSync(path.join(DIST, 'sitemap.xml'), sitemap)
+
+console.log(
+  'prerendered: / , /blog (' + posts.length + ' posts), /slides (' + decks.length + ' decks); sitemap ' + urls.length + ' urls'
+)

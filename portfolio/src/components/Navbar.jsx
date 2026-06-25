@@ -10,7 +10,8 @@ const navItems = [
   { type: 'section', id: 'experience', label: 'Work' },
   { type: 'section', id: 'now', label: 'Now' },
   { type: 'section', id: 'projects', label: 'Projects' },
-  { type: 'route', to: '/blog', label: 'Blog' },
+  { type: 'section', id: 'blog', label: 'Blog' },
+  { type: 'section', id: 'slides', label: 'Slides' },
   { type: 'section', id: 'vlog', label: 'Daily Log' },
   { type: 'section', id: 'contact', label: 'Contact' },
 ]
@@ -66,8 +67,6 @@ export default function Navbar({ onOpenPalette }) {
     if (onHome) window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const isBlog = location.pathname.startsWith('/blog')
-
   return (
     <header className={`nav ${scrolled ? 'scrolled' : ''}`}>
       <nav className="nav__inner">
@@ -81,7 +80,7 @@ export default function Navbar({ onOpenPalette }) {
               <Link
                 key={n.to}
                 to={n.to}
-                className={`nav__link ${isBlog ? 'active' : ''}`}
+                className={`nav__link ${location.pathname.startsWith(n.to) ? 'active' : ''}`}
                 onClick={close}
               >
                 {n.label}

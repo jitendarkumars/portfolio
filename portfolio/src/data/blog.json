@@ -1,5 +1,248 @@
 [
   {
+    "id": "designing-idempotent-apis",
+    "title": "Designing Idempotent APIs: Making Retries Safe",
+    "date": "2026-06-25",
+    "readingTime": "8 min",
+    "tags": [
+      "System Design",
+      "APIs",
+      "Backend",
+      "Idempotency",
+      "Payments"
+    ],
+    "excerpt": "A dropped response makes a mobile client retry a payment — and suddenly you've charged someone twice. Here's how I give POST the idempotency that PUT gets for free, with a key, a unique constraint, and a stored response.",
+    "blocks": [
+      {
+        "type": "p",
+        "text": "Every payment flow I've built has the same ghost in it: the network. A mobile client fires a POST to charge a wallet, the charge succeeds on the server, and then the response evaporates on the way back — a dropped connection, a timeout, an app pushed to the background. The client heard nothing, so it does the only sensible thing and retries. Now you've charged someone twice. Idempotency is how you make that retry safe, and across the fintech work I've done — wallets, transfers, ticket creation — it isn't a nice-to-have. It's the line between a dependable API and a support queue full of refund requests."
+      },
+      {
+        "type": "h",
+        "text": "Safe, idempotent, and the problem child"
+      },
+      {
+        "type": "p",
+        "text": "HTTP already has opinions here, and they're worth getting straight. RFC 9110 sorts methods into two buckets that people constantly conflate. Safe methods — GET, HEAD, OPTIONS, TRACE — don't change server state at all. Idempotent methods are the ones where making the same call many times leaves the server in the same state as making it once. Every safe method is idempotent, and PUT and DELETE are too: deleting an already-deleted record still leaves it gone. The problem child is POST. By definition it's neither safe nor idempotent — two identical POSTs are meant to create two things. That's exactly what you want for 'add a comment' and exactly what you don't want for 'charge the wallet'. So the whole exercise is giving POST the guarantee that PUT gets for free."
+      },
+      {
+        "type": "h",
+        "text": "The idempotency key"
+      },
+      {
+        "type": "p",
+        "text": "The mechanism is a key the client generates once per logical operation and sends on every attempt at it. The server uses that key to recognize a retry. Stripe popularized the pattern, and the IETF's HTTPAPI working group now has an active draft standardizing the exact header — Idempotency-Key — so this is becoming a real convention rather than one vendor's trick."
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "# Same logical operation -> same key on every retry\ncurl https://api.example.com/v1/payments \\\n  -H \"Idempotency-Key: a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{ \"amount\": 49900, \"currency\": \"INR\", \"source\": \"wallet_123\" }'"
+      },
+      {
+        "type": "p",
+        "text": "The thing to internalize is that the key identifies the operation, not the HTTP request. Every retry of the same charge carries the same key; a genuinely new charge gets a fresh one. Stripe suggests a v4 UUID or any random string with enough entropy to avoid collisions, and caps the value at 255 characters — sane defaults to copy. Don't derive it from sensitive data like an email address."
+      },
+      {
+        "type": "h",
+        "text": "Store first, then do the work"
+      },
+      {
+        "type": "p",
+        "text": "The naive server implementation is 'look the key up; if I've seen it, return the old response; otherwise do the work and save it.' That has a race built in. Two retries arriving a few milliseconds apart both look up, both miss, and both charge the wallet — the exact bug you were trying to kill. The fix is to stop treating the lookup as the gate and let the database enforce uniqueness. The insert itself becomes the claim."
+      },
+      {
+        "type": "code",
+        "lang": "sql",
+        "code": "create table idempotency_keys (\n  user_id          text        not null,\n  idempotency_key  text        not null,\n  fingerprint      text        not null,   -- hash of method + path + body\n  status           text        not null,   -- 'in_progress' | 'completed'\n  response_code    int,\n  response_body    jsonb,\n  created_at       timestamptz not null default now(),\n  -- the claim is scoped to the caller; the DB enforces 'once'\n  primary key (user_id, idempotency_key)\n);"
+      },
+      {
+        "type": "code",
+        "lang": "typescript",
+        "code": "async function withIdempotency(req: Req, run: () => Promise<Result>) {\n  const key = req.header('Idempotency-Key');\n  if (!key) throw new BadRequestException('Idempotency-Key header is required');\n\n  const fingerprint = sha256(`${req.method} ${req.path} ${stableStringify(req.body)}`);\n\n  // 1. Claim the key. The unique constraint is the concurrency guard:\n  //    if two retries race, exactly one INSERT wins.\n  try {\n    await db.insert('idempotency_keys', {\n      userId: req.userId, idempotencyKey: key, fingerprint, status: 'in_progress',\n    });\n  } catch (e) {\n    if (!isUniqueViolation(e)) throw e;\n\n    const prior = await db.findOne('idempotency_keys', {\n      userId: req.userId, idempotencyKey: key,\n    });\n\n    if (prior.fingerprint !== fingerprint)      // same key, different body\n      throw new UnprocessableEntityException('Key reused for a different request');\n    if (prior.status === 'in_progress')         // a retry while we're still working\n      throw new ConflictException('Request already in progress, retry shortly');\n\n    return { code: prior.responseCode, body: prior.responseBody }; // replay\n  }\n\n  // 2. First time for this key: do the work and persist the result in the SAME\n  //    transaction, so the side effect and its receipt commit together.\n  const result = await run();\n  await db.update('idempotency_keys',\n    { userId: req.userId, idempotencyKey: key },\n    { status: 'completed', responseCode: result.code, responseBody: result.body });\n\n  return result;\n}"
+      },
+      {
+        "type": "h",
+        "text": "Three states, three honest responses"
+      },
+      {
+        "type": "p",
+        "text": "Once the unique key is the gate, every request lands in one of a few buckets, and each has a correct HTTP answer rather than a fudge."
+      },
+      {
+        "type": "ul",
+        "items": [
+          "Brand-new key: your INSERT wins, you run the operation, store the status code and body, and return them.",
+          "Same key, still in progress: a concurrent retry caught the first one mid-flight — return 409 Conflict and let the client back off and try again shortly.",
+          "Same key, already completed: replay the stored status and body verbatim — even if the original ended in a 4xx, the retry should see that same 4xx, not a fresh attempt.",
+          "Same key, different body: the client reused a key for a different operation, which is a bug on their side — return 422 and refuse, rather than silently replaying the wrong result."
+        ]
+      },
+      {
+        "type": "p",
+        "text": "That last case is why I store a fingerprint — a hash of the method, path, and body — next to the key. Without it, a client that accidentally reuses a key gets back someone else's answer and never finds out."
+      },
+      {
+        "type": "quote",
+        "text": "The dangerous failure isn't the double charge — it's charging the wallet, crashing before you record the result, then 'helpfully' replaying a 500 on the retry while the money has already moved. The business write and its idempotency record have to commit in the same transaction, or your replay is quietly lying."
+      },
+      {
+        "type": "h",
+        "text": "What I always check now"
+      },
+      {
+        "type": "ul",
+        "items": [
+          "Scope the key to the caller. Make the constraint (user_id, idempotency_key) so two clients can never collide on the same string.",
+          "Commit the side effect and the stored response together. A half-written record is worse than no record at all.",
+          "Treat keys as a dedup window, not permanent history. Stripe prunes them after about 24 hours; reusing a key past that simply starts a fresh request, which is fine.",
+          "Don't bolt this onto GET, PUT, or DELETE — they're already idempotent per the spec. Reserve the machinery for POST and PATCH, where it actually earns its place."
+        ]
+      },
+      {
+        "type": "p",
+        "text": "None of this is exotic — it's a unique constraint, a stored response, and a fingerprint. But it's the unglamorous layer that lets a phone on a flaky train connection mash the Pay button three times and still get charged once. Build it into your payment and order-creation endpoints from the start; retrofitting idempotency after you've already shipped a double charge is a far worse afternoon than writing it up front."
+      }
+    ]
+  },
+  {
+    "id": "running-llms-locally-with-lm-studio",
+    "title": "Running LLMs Locally with LM Studio (and Pointing Your Code at Them)",
+    "date": "2026-06-24",
+    "readingTime": "9 min",
+    "tags": [
+      "LM Studio",
+      "Local AI",
+      "MLX",
+      "OpenAI API",
+      "Tools"
+    ],
+    "excerpt": "LM Studio runs real models on your own machine and exposes them behind the exact OpenAI API your code already speaks. Here's how I download, load, and serve a local model — and the honest cases where local beats the cloud.",
+    "blocks": [
+      {
+        "type": "p",
+        "text": "My default for anything involving an LLM used to be a cloud API key — it's fast to start and someone else owns the GPUs. But a lot of what I build touches data that shouldn't leave the building: bank records, client systems, half-finished product code. Shipping every prompt to a third party for that work is a non-starter. LM Studio is what I reach for instead. It runs real models on my own machine and, crucially, exposes them behind the exact same OpenAI API my code already speaks. Here's how I set it up, and the honest cases where local actually wins."
+      },
+      {
+        "type": "h",
+        "text": "What LM Studio actually is"
+      },
+      {
+        "type": "p",
+        "text": "LM Studio is a desktop app for finding, downloading, and running local models — but the part that matters to me as a developer is underneath the GUI. It runs two engines: llama.cpp for GGUF models, which works on basically any hardware, and Apple's MLX on Apple Silicon, which is built for the M-series chips and their unified memory. It also ships a CLI called lms and a local server that speaks the OpenAI API. That server is the whole reason this is more than a toy chat window."
+      },
+      {
+        "type": "h",
+        "text": "Step 1 — Download a model"
+      },
+      {
+        "type": "p",
+        "text": "You can do everything from the GUI, but I live in the terminal. lms ships with LM Studio; you just have to launch the app once so it gets wired up. After that, pulling a model is one command. On my Mac I bias toward MLX builds because they're native to Apple Silicon, and fall back to GGUF when I want portability or a quant MLX doesn't have."
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "# lms ships with LM Studio — launch the app once first\nlms get llama-3.1-8b          # download (prompts you to pick a quant)\nlms get llama-3.1-8b@q4_k_m   # ...or pin a specific quantization\nlms get --mlx                 # browse only MLX builds (Apple Silicon)\n\nlms ls                        # list what's on disk"
+      },
+      {
+        "type": "p",
+        "text": "A word on quantization: q4_k_m is my default starting point. It keeps most tensors at 4-bit and bumps a few sensitive ones higher, so it holds up better than a flat 4-bit quant — and a 7–8B model at that size is only a few gigabytes. Move to a higher-bit quant when you have the memory and want the accuracy."
+      },
+      {
+        "type": "h",
+        "text": "Step 2 — Load it into memory"
+      },
+      {
+        "type": "p",
+        "text": "Downloading isn't loading. Loading pulls the weights into RAM, and that's where you choose how much to offload to the GPU and how big a context window to reserve — both cost memory."
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "# --gpu: max | auto | 0.0-1.0    --context-length: tokens to reserve\nlms load llama-3.1-8b --gpu=max --context-length=8192 --identifier=\"dev-model\"\n\nlms ps   # list models currently loaded in memory"
+      },
+      {
+        "type": "p",
+        "text": "I give the model a stable --identifier so the name my code targets doesn't change every time I reload it. Context length is a genuine tradeoff: a bigger window eats memory you could otherwise spend on a bigger, smarter model, so I size it to the task instead of maxing it out by reflex."
+      },
+      {
+        "type": "h",
+        "text": "Step 3 — Turn on the OpenAI-compatible server"
+      },
+      {
+        "type": "p",
+        "text": "This is the unlock. One command starts a local server that accepts the same requests as OpenAI's API — GET /v1/models, POST /v1/chat/completions, /v1/completions, and /v1/embeddings — on http://localhost:1234 by default."
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "lms server start               # serves on http://localhost:1234\nlms server start --port 4000   # or choose your own port\nlms server status\n\n# sanity check — what is the server exposing right now?\ncurl http://localhost:1234/v1/models"
+      },
+      {
+        "type": "h",
+        "text": "Step 4 — Point your existing code at it"
+      },
+      {
+        "type": "p",
+        "text": "Here's the good part: you don't write anything LM-Studio-specific. Take whatever OpenAI client you already use, change the base URL to localhost, and pass any non-empty string as the API key — it isn't checked locally. Everything else behaves the way you expect."
+      },
+      {
+        "type": "code",
+        "lang": "bash",
+        "code": "curl http://localhost:1234/v1/chat/completions \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"model\": \"dev-model\",\n    \"messages\": [\n      { \"role\": \"system\", \"content\": \"You are a terse assistant.\" },\n      { \"role\": \"user\", \"content\": \"Explain idempotency in one sentence.\" }\n    ],\n    \"temperature\": 0.4\n  }'"
+      },
+      {
+        "type": "p",
+        "text": "And the same call from the SDK I actually use day to day, in Node:"
+      },
+      {
+        "type": "code",
+        "lang": "javascript",
+        "code": "import OpenAI from \"openai\";\n\n// Same SDK as the cloud — only baseURL changes.\nconst client = new OpenAI({\n  baseURL: \"http://localhost:1234/v1\",\n  apiKey: \"lm-studio\", // any non-empty string; not checked locally\n});\n\nconst res = await client.chat.completions.create({\n  model: \"dev-model\", // must match a loaded model (see GET /v1/models)\n  messages: [\n    { role: \"system\", content: \"You are a terse assistant.\" },\n    { role: \"user\", content: \"Explain idempotency in one sentence.\" },\n  ],\n  temperature: 0.4,\n});\n\nconsole.log(res.choices[0].message.content);"
+      },
+      {
+        "type": "p",
+        "text": "Because it's the OpenAI contract, the whole ecosystem comes along for free — LangChain, the Vercel AI SDK, your own thin wrapper, even third-party tools that only know how to talk to OpenAI. LM Studio also supports streaming, tool/function calling, and structured (JSON-schema) output, and it exposes an Anthropic-compatible messages endpoint if your code speaks that dialect instead. When a model name trips you up, hit GET /v1/models — the identifier you pass has to match something that's actually loaded."
+      },
+      {
+        "type": "quote",
+        "text": "The mental model that makes this click: once your model is at http://localhost:1234/v1, your application can't tell whether it's talking to your laptop or to a data center. That swappability is the entire point."
+      },
+      {
+        "type": "h",
+        "text": "When local wins — and when it doesn't"
+      },
+      {
+        "type": "p",
+        "text": "I don't run everything locally. After leaning on this for real work, here's the honest split."
+      },
+      {
+        "type": "ul",
+        "items": [
+          "Privacy: prompts and data never leave the machine. This is the reason I can point a model at bank or client material at all.",
+          "Cost: no per-token bill, so I can be wasteful while iterating — batch a thousand records or leave a loop running overnight without watching a meter.",
+          "Offline and unthrottled: it works on a plane, and there are no rate limits or quota emails.",
+          "Reproducibility: pin the model and pass a seed, and runs are far more deterministic than a cloud endpoint that can change under you."
+        ]
+      },
+      {
+        "type": "p",
+        "text": "And where I still reach for the cloud:"
+      },
+      {
+        "type": "ul",
+        "items": [
+          "Frontier reasoning: the best closed models still out-think anything that fits on a laptop, so the hardest tasks go to the cloud.",
+          "Big models and big context: you're bounded by your RAM, and a large context window competes with model size for it.",
+          "Serving real traffic: many concurrent users is a job for actual infrastructure, not your dev machine."
+        ]
+      },
+      {
+        "type": "p",
+        "text": "My rule of thumb is simple: prototype and run anything sensitive locally, and call the cloud only when the task genuinely needs frontier reasoning or scale. Because LM Studio speaks the OpenAI API, switching between the two is a one-line base-URL change — so 'local vs cloud' stops being an architecture decision and becomes a config flag. That's the part I wish I'd adopted sooner."
+      }
+    ]
+  },
+  {
     "id": "tradingview-android-charting-library",
     "title": "Embedding TradingView Advanced Charts in a Native Android App",
     "date": "2026-06-22",
