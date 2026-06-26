@@ -1,5 +1,18 @@
 [
   {
+    "id": "day-3",
+    "date": "2026-06-26",
+    "title": "Day 3 — ComfyUI Setup and Quiz App Dev",
+    "youtube": "",
+    "mood": "🔧",
+    "notes": "Spent the day setting up ComfyUI with FP32 precision and developing quizwhiz, a Node.js quiz application. Researched ComfyUI issues and procedural terrain generation while monitoring heavy memory usage from Python and Node processes.",
+    "tasks": [
+      "Ran ComfyUI with --enable-manager and --force-fp32 flags",
+      "Developed quizwhiz using npm run dev and tested quiz questions in browser",
+      "Researched ComfyUI GitHub issues and ProceduralTerrains repository for reference"
+    ]
+  },
+  {
     "id": "day-2",
     "date": "2026-06-25",
     "title": "Day 2 — ChronoVerse planning and quizwhiz dev",
